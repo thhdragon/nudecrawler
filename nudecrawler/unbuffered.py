@@ -1,4 +1,3 @@
-
 class Unbuffered(object):
     def __init__(self, stream):
         self.stream = stream

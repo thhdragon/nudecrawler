@@ -1,62 +1,80 @@
+[project]
+name = "nudecrawler"
+authors = [
+  { name = "Yaroslav Polyakov", email = "yaroslaff@gmail.com" },
+]
+description = "Crawl telegra.ph searching for nudes!"
+readme = "README.md"
+license = { text = "MIT License" }
+keywords = [
+  "crawl",
+  "crawler",
+  "find",
+  "nsfw",
+  "nsfw-recognition",
+  "nude",
+  "nudes",
+  "nudity-detection",
+  "onlyfans",
+  "scrape",
+  "scraper",
+  "scraping",
+  "search",
+  "spider",
+  "telegra-ph",
+  "tits",
+  "web-scraping",
+  "webscraping"
+]
+
+requires-python = ">= 3.9"
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.9",
+  "Topic :: Games/Entertainment",
+  "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+  "Topic :: Scientific/Engineering :: Image Recognition"
+]
+dependencies = [
+  "beautifulsoup4",
+  "evalidate",
+  "flask",
+  "mudepy",
+  "nudenet",
+  "numpy",
+  "pillow",
+  "pytest",
+  "python-daemon",
+  "python-dotenv",
+  "requests",
+  "rich",
+  "toml",
+  "transliterate"
+]
+dynamic = ["version"]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/yaroslaff/nudecrawler/issues"
+Changelog = "https://github.com/yaroslaff/nudecrawler/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/yaroslaff/nudecrawler"
+Repository = "https://github.com/yaroslaff/nudecrawler.git"
+
+[project.scripts]
+detect-image-aid = "nudecrawler.scripts.detect_image_aid:main"
+detect-image-falconsai = "nudecrawler.scripts.detect_image_falconsai:main"
+detect-image-nsfw-api = "nudecrawler.scripts.detect_image_nsfw_api:main"
+detect-image-nudenet = "nudecrawler.scripts.detect_image_nudenet:main"
+detect-server-falconsai = "nudecrawler.scripts.detect_server_falconsai:main"
+detect-server-nudenet = "nudecrawler.scripts.detect_server_nudenet:main"
+nudecrawler = "nudecrawler.scripts.nudecrawler:main"
+nudecrawler-makeurls = "nudecrawler.scripts.nudecrawler_makeurls:main"
+
 [build-system]
 requires = ["hatchling", "wheel"]
 build-backend = "hatchling.build"
 
 [tool.hatch.version]
-path = 'nudecrawler/version.py'
-
-[project]
-name="nudecrawler"
-authors = [
-  {name = "Yaroslav Polyakov", email = "yaroslaff@gmail.com"},
-]
-description = "Crawl telegra.ph searching for nudes!" 
-readme = "README.md"
-license = {text = "MIT License"}
-keywords = ["nsfw", "tits", "nudity-detection", "nsfw-recognition", "nudes", "onlyfans", "nude", "telegra-ph", "search", "crawler", "scraper", "spider", "scraping", "find", "web-scraping", "crawl", "scrape", "webscraping"]
-
-dynamic = [ "version" ]
-requires-python = ">= 3.9"
-dependencies = [
-    'beautifulsoup4>=4.12.0',
-    'transliterate>=1.10.2',
-    'pillow>=9.4.0',
-    'requests>=2.28.2',
-    'mudepy>=0.5.2',
-    'numpy<2.0.0',
-    'evalidate>=2.0.3',
-    'pytest>=7.2.2',
-    'nudenet>=3.4.2',
-    'python-daemon>=3.0.1',
-    'python-dotenv>=1.0.0',
-    'flask',
-    'toml',
-    'rich'
-]
-classifiers=[
-    'Development Status :: 5 - Production/Stable',
-    'Environment :: Console',
-    'Intended Audience :: End Users/Desktop',
-    'License :: OSI Approved :: MIT License',
-    'Programming Language :: Python :: 3.9',
-    'Topic :: Internet :: WWW/HTTP :: Indexing/Search',
-    'Topic :: Scientific/Engineering :: Image Recognition',
-    'Topic :: Games/Entertainment'
-]
-
-
-
-[project.urls]
-Homepage = "https://github.com/yaroslaff/nudecrawler"
-Repository = "https://github.com/yaroslaff/nudecrawler.git"
-"Bug Tracker" = "https://github.com/yaroslaff/nudecrawler/issues"
-Changelog = "https://github.com/yaroslaff/nudecrawler/blob/master/CHANGELOG.md"
-
-[project.scripts]
-nudecrawler = "nudecrawler.scripts.nudecrawler:main"
-detect-image-aid = "nudecrawler.scripts.detect_image_aid:main"
-detect-image-nsfw-api = "nudecrawler.scripts.detect_image_nsfw_api:main"
-detect-image-nudenet = "nudecrawler.scripts.detect_image_nudenet:main"
-detect-server-nudenet = "nudecrawler.scripts.detect_server_nudenet:main"
-nudecrawler-makeurls = "nudecrawler.scripts.nudecrawler_makeurls:main"
-
+path = "nudecrawler/version.py"

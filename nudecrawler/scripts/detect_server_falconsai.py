@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 
-from flask import Flask, request
+import argparse
 import os
+import signal
 import sys
+
 import daemon
 from daemon import pidfile
-
-# import lockfile
-import argparse
-import signal
-from PIL import UnidentifiedImageError
+from flask import Flask, request
+from PIL import Image, UnidentifiedImageError
 from rich.pretty import pprint
+from transformers import pipeline
 
-from ..config import read_config, get_config_path
-from ..nudenet import nudenet_detect
+from ..config import get_config_path, read_config
 
 app = Flask(__name__)
+classifier = None
 
-pidfile_path = "/tmp/.nudenet-server.pid"
+pidfile_path = "/tmp/.falconsai-server.pid"
 
 
 @app.get("/ping")
@@ -28,24 +28,32 @@ def ping():
 @app.route("/detect", methods=["POST"])
 def detect():
     path = request.json["path"]
-    page = request.json["page"]
+    page = request.json.get("page")
+    threshold = float(
+        request.json.get("threshold", os.getenv("DETECTOR_THRESHOLD", "0.5"))
+    )
 
     try:
-        verdict = nudenet_detect(path=path, page_url=page)
+        image = Image.open(path).convert("RGB")
+        results = classifier(image)
     except UnidentifiedImageError as e:
         print(f"Err: {page} {e}")
-        result = {"status": "ERROR", "error": str(e)}
-        return result
+        return {"status": "ERROR", "error": str(e)}
     except Exception as e:
         print(f"Got uncaught exception {type(e)}: {e}")
+        return {"status": "ERROR", "error": str(e)}
 
-    pprint(f"{page}: {verdict}")
-    return dict(verdict=verdict, page=page)
+    scores = {r["label"]: r["score"] for r in results}
+    nsfw_score = scores.get("nsfw", 0.0)
+    verdict = nsfw_score >= threshold
+
+    pprint(f"{page}: {verdict} (nsfw={nsfw_score:.3f})")
+    return dict(verdict=verdict, page=page, nsfw_score=nsfw_score)
 
 
 def get_args():
     config_path = get_config_path()
-    parser = argparse.ArgumentParser("Daemonical REST API for NudeNet")
+    parser = argparse.ArgumentParser("Daemonical REST API for Falconsai NSFW detection")
     parser.add_argument("--port", type=int, default=5000)
     parser.add_argument("-d", "--daemon", action="store_true", default=False)
     parser.add_argument(
@@ -59,10 +67,16 @@ def get_args():
     return parser.parse_args()
 
 
-def main():
+def load_model():
     global classifier
-    global pidfile
+    print("Loading Falconsai NSFW model...")
+    classifier = pipeline(
+        "image-classification", model="Falconsai/nsfw_image_detection"
+    )
+    print("Model ready.")
 
+
+def main():
     read_config()
     args = get_args()
 
@@ -70,7 +84,7 @@ def main():
         try:
             with open(pidfile_path) as fh:
                 pid = int(fh.read())
-                print("Killing nudenet server with pid", pid)
+                print("Killing falconsai server with pid", pid)
                 os.kill(pid, signal.SIGINT)
             os.unlink(pidfile_path)
         except FileNotFoundError:
@@ -79,17 +93,11 @@ def main():
 
     if args.daemon:
         print("work as daemon...")
-        with daemon.DaemonContext(
-            # pidfile=lockfile.FileLock(args.pidfile)
-            pidfile=pidfile.TimeoutPIDLockFile(pidfile_path)
-        ):
-            # pid = os.getpid()
-            # with open(pidfile, "w+") as fh:
-            #    print(pid, file=fh)
-            print("daemon app.run")
+        with daemon.DaemonContext(pidfile=pidfile.TimeoutPIDLockFile(pidfile_path)):
+            load_model()
             app.run(port=args.port)
-            print("after app.run")
     else:
+        load_model()
         app.run(port=args.port)
 
     print("done.")

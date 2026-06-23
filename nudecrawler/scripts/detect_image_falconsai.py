@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-"""
-script to check via NudeNet
-https://github.com/notAI-tech/NudeNet
+"""script to check via Falconsai NSFW Image Detection.
+
+https://huggingface.co/Falconsai/nsfw_image_detection.
 """
 
 import os
@@ -11,31 +11,25 @@ from urllib.parse import urljoin
 
 import requests
 
-from nudecrawler.exceptions import *
+from nudecrawler.exceptions import NudeCrawlerException
 from nudecrawler.localimage import basic_check
 
-# from nudenet import NudeClassifier
-
-start_detector = "detect-server-nudenet.py"
+start_detector = "detect-server-falconsai.py"
 
 
 def detect_nudity(path, address, threshold):
     endpoint = urljoin(address, "/detect")
     try:
-        r = requests.post(endpoint, json={"path": path, "page": os.getenv("NUDECRAWLER_PAGE_URL")})
+        r = requests.post(endpoint, json={"path": path, "threshold": threshold})
         r.raise_for_status()
-
     except requests.RequestException as e:
         print(e)
         print("maybe detector not running?")
-        print(start_detector)
+        print(f"start with: python {start_detector}")
         print("or add -a to skip filtering")
         sys.exit(100)
 
     rj = r.json()
-
-    # since verdict: True=1=nude we invert it to get nude = exit code 0
-
     return int(not rj["verdict"])
 
 
