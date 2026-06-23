@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import argparse
 import datetime
 import json
 import logging
@@ -11,6 +12,7 @@ import sys
 import time
 
 import transliterate.discover
+from dotenv import load_dotenv
 from rich.pretty import pprint
 
 import nudecrawler
@@ -22,6 +24,7 @@ from ..cache import cache
 # from ..verbose import printv
 from ..config import get_args
 from ..page import context_fields, get_processed_images
+from ..version import __version__
 
 transliterate.discover.autodiscover()
 
@@ -57,7 +60,7 @@ stats = {
     "found_nude_images": 0,
     "found_new_nude_images": 0,
     "found_new_total_images": 0,
-    "resume": dict(),
+    "resume": {},
     "gap_max": 0,
     "gap_url": None,
     "cache_path": None,
@@ -145,7 +148,7 @@ def analyse(url):
 
         if logfile:
             with open(logfile, "a") as fh:
-                if logfile.endswith(".json") or logfile.endswith(".jsonl"):
+                if logfile.endswith((".json", ".jsonl")):
                     print(p.as_json(), file=fh)
                 else:
                     print(p, file=fh)
@@ -284,9 +287,7 @@ def main():
 
     words = None
     args = get_args(
-        argv=None,
-        methods_list=", ".join(filter_methods.keys()),
-        context_fields=context_fields,
+        argv=None, methods_list=", ".join(filter_methods.keys()), context_fields=context_fields
     )
     sanity_check(args)
 
@@ -303,13 +304,13 @@ def main():
         sys.stdout = Unbuffered(sys.stdout)
 
     if args.resume:
-        if args.workdir:
+        if args.workdir and not (os.path.isabs(args.resume) or args.resume.startswith(("/", "\\"))):
             args.resume = os.path.join(args.workdir, args.resume)
 
         print("Resume from", args.resume)
         try:
             load_stats(args.resume)
-        except FileNotFoundError:
+        except FileNotFoundError as e:
             abort(f"Missing status file {args.resume}")
 
         cmd = stats["cmd"]
@@ -321,7 +322,7 @@ def main():
     if args.workdir:
         for attr in ["cache", "wordlist", "log", "resume", "stats"]:
             old = getattr(args, attr)
-            if old is not None:
+            if old is not None and not (os.path.isabs(old) or old.startswith(("/", "\\"))):
                 new = os.path.join(args.workdir, old)
                 setattr(args, attr, new)
 
@@ -353,10 +354,9 @@ def main():
             )
             sys.exit(1)
 
-        if kind in ["image", "url"]:
-            if shutil.which(basename) is None:
-                print(f"Cannot find {basename}, maybe not in $PATH?", file=sys.stderr)
-                sys.exit(1)
+        if kind in ["image", "url"] and shutil.which(basename) is None:
+            print(f"Cannot find {basename}, maybe not in $PATH?", file=sys.stderr)
+            sys.exit(1)
 
         if kind == "builtin":
             if basename in [":nude", ":nudenet"]:
@@ -438,10 +438,7 @@ def main():
 
         days_tried = 0
         while days_tried < args.days:
-            if fastforward:
-                resumecount = stats["resume"]["count"]
-            else:
-                resumecount = None
+            resumecount = stats["resume"]["count"] if fastforward else None
             # stop fastforward
             fastforward = False
             check_word(w, day, args.fails, resumecount=resumecount)
