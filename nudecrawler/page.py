@@ -455,6 +455,26 @@ class Page:
                             self.log(f"{ri.url} is NOT nude")
                     except Exception as e:
                         print(f"Error detecting {ri.url}: {e}")
+        else:
+            if self.batch_manager and self.batch_manager.keep_dir:
+                targets = image_list[: self.max_pictures]
+
+                def process_target_keep(url):
+                    try:
+                        from .batch import save_to_keep
+                        save_to_keep(url, keep_dir=self.batch_manager.keep_dir)
+                    except Exception as e:
+                        self.error(f"Error saving image {url} to keep: {e}")
+
+                if self.workers > 1:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
+                        list(executor.map(process_target_keep, targets))
+                else:
+                    for url in targets:
+                        process_target_keep(url)
+
+                with processed_images_lock:
+                    processed_images += len(targets)
 
     def status(self):
 

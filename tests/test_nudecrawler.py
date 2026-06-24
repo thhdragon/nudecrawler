@@ -150,4 +150,29 @@ class TestBasic:
         assert day.day == 3
         assert resumecount == 5
 
+    def test_all_found_keep(self, tmp_path):
+        from nudecrawler.batch import BatchManager
+        from nudecrawler.page import Page
+        from nudecrawler.cache import cache
+        import os
+
+        cache._url2sum.clear()
+        cache._sum2v.clear()
+
+        keep_dir = str(tmp_path / "keep")
+        bm = BatchManager(
+            batch_size=2,
+            detect_image_script=None,
+            keep_dir=keep_dir,
+            workers=4
+        )
+
+        p = Page(belle_delphine, all_found=True, batch_manager=bm, max_pictures=3, min_total_images=0)
+        p.check_all()
+
+        files = os.listdir(keep_dir)
+        assert len(files) == 3
+        for f in files:
+            assert f.endswith((".jpg", ".jpeg", ".png"))
+
 

@@ -31,6 +31,11 @@ def save_to_keep(url, path=None, sum=None, keep_dir=None):
         with cache._lock:
             sum = cache._url2sum.get(url)
             
+    if sum:
+        dest = os.path.join(keep_dir, f"{sum}{ext}")
+        if os.path.exists(dest):
+            return
+
     if path and os.path.exists(path):
         if not sum:
             sum = sha1sum(path)
@@ -40,6 +45,10 @@ def save_to_keep(url, path=None, sum=None, keep_dir=None):
                 shutil.copy(path, dest)
             except Exception as e:
                 print(f"Error copying image to keep: {e}")
+        with cache._lock:
+            if url not in cache._url2sum:
+                cache._url2sum[url] = sum
+                cache._new += 1
     else:
         from .remoteimage import RemoteImage
         try:
@@ -49,6 +58,10 @@ def save_to_keep(url, path=None, sum=None, keep_dir=None):
             dest = os.path.join(keep_dir, f"{sum}{ext}")
             if not os.path.exists(dest):
                 shutil.copy(ri.path, dest)
+            with cache._lock:
+                if url not in cache._url2sum:
+                    cache._url2sum[url] = sum
+                    cache._new += 1
         except Exception as e:
             print(f"Error downloading image to keep: {e}")
 
