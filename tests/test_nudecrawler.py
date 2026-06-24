@@ -30,3 +30,39 @@ class TestBasic:
         p.check_all()
         assert p.status().startswith("INTERESTING"), "Bad status!"
         print(p)
+
+    def test_batch_manager(self, tmp_path):
+        from nudecrawler.batch import BatchManager
+        from nudecrawler.page import Page
+        from nudecrawler.cache import cache
+        import os
+
+        cache._url2sum.clear()
+        cache._sum2v.clear()
+
+        keep_dir = str(tmp_path / "keep")
+        
+        finalized_pages = []
+        def on_finalized(p):
+            finalized_pages.append(p)
+
+        bm = BatchManager(
+            batch_size=2,
+            detect_image_script=":true",
+            keep_dir=keep_dir,
+            on_page_finalized=on_finalized,
+            workers=4
+        )
+
+        p = Page(belle_delphine, detect_image=":true", batch_manager=bm, max_pictures=5, min_total_images=0)
+        p.check_all()
+        bm.flush()
+
+        assert p.pending_images == 0
+        assert p in finalized_pages
+        assert p.nude_images > 0
+        
+        files = os.listdir(keep_dir)
+        assert len(files) > 0
+        for f in files:
+            assert f.endswith((".jpg", ".jpeg", ".png"))

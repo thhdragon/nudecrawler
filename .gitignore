@@ -7,3 +7,7 @@ __pycache__/
 poetry.lock
 .venv
 
+**/keep_nudes/
+cache.json.tmp
+
+**/cache.json

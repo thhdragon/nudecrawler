@@ -83,6 +83,7 @@ refresh = None
 detect_image = None
 detect_url = None
 workers = 1
+batch_manager = None
 
 #
 # page_mintotal = 0
@@ -106,31 +107,12 @@ filter_methods = {
 }
 
 
-def analyse(url):
+def finalize_page(p):
+    global stop_after, previous_content_length, logfile, verbose
 
-    global stop_after, previous_content_length, workers
+    p.status()  # ensure status is compiled
 
-    p = Page(
-        url,
-        all_found=all_found,
-        detect_url=detect_url,
-        detect_image=detect_image,
-        ignore_content_length=previous_content_length,
-        min_images_size=stats["filter"]["min_image_size"],
-        image_extensions=stats["filter"]["image_extensions"],
-        min_total_images=stats["filter"]["min_total_images"],
-        max_errors=stats["filter"]["max_errors"],
-        max_pictures=stats["filter"]["max_pictures"],
-        expr=stats["filter"]["expr"],
-        min_content_length=stats["filter"]["min_content_length"],
-        workers=workers,
-    )
-
-    stats["urls"] += 1
-
-    p.check_all()
-
-    stats["last"]["url"] = url
+    stats["last"]["url"] = p.url
     stats["last"]["status"] = p._status
     stats["last"]["detailed"] = p._status_detailed
 
@@ -142,7 +124,7 @@ def analyse(url):
     if p.status().startswith("INTERESTING"):
         stats["found_interesting_pages"] += 1
         stats["found_nude_images"] += p.nude_images
-        stats["last_interesting"]["url"] = url
+        stats["last_interesting"]["url"] = p.url
         stats["last_interesting"]["status"] = p._status
         stats["last_interesting"]["detailed"] = p._status_detailed
 
@@ -167,14 +149,40 @@ def analyse(url):
     if stop_after is not None and get_processed_images() > stop_after:
         print("Stop/refresh after processed", get_processed_images(), "images...")
         if refresh:
-            # print("Refresh:", refresh)
             subprocess.run(refresh)
-
-            # schedule next stop
             stop_after = get_processed_images() + stop_each
         else:
             print("No --refresh, exiting with code 2")
             sys.exit(2)
+
+
+def analyse(url):
+
+    global stop_after, previous_content_length, workers, batch_manager
+
+    p = Page(
+        url,
+        all_found=all_found,
+        detect_url=detect_url,
+        detect_image=detect_image,
+        ignore_content_length=previous_content_length,
+        min_images_size=stats["filter"]["min_image_size"],
+        image_extensions=stats["filter"]["image_extensions"],
+        min_total_images=stats["filter"]["min_total_images"],
+        max_errors=stats["filter"]["max_errors"],
+        max_pictures=stats["filter"]["max_pictures"],
+        expr=stats["filter"]["expr"],
+        min_content_length=stats["filter"]["min_content_length"],
+        workers=workers,
+        batch_manager=batch_manager,
+    )
+
+    stats["urls"] += 1
+
+    p.check_all()
+
+    if p.pending_images == 0:
+        finalize_page(p)
 
     return p
 
@@ -395,10 +403,21 @@ def main():
             print(f"# No cache file {stats['cache_path']}, start with empty cache")
 
     # processing could start here
+    global batch_manager
+    from ..batch import BatchManager
+    batch_manager = BatchManager(
+        batch_size=args.batch_size,
+        detect_image_script=detect_image,
+        keep_dir=args.keep,
+        on_page_finalized=finalize_page,
+        workers=args.workers,
+    )
 
     # --url
     if args.url:
         p = analyse(args.url)
+        if batch_manager:
+            batch_manager.flush()
         print(p.status())
         for msg in p._log:
             print(" ", msg)
@@ -445,6 +464,9 @@ def main():
 
             days_tried += 1
             day = day - datetime.timedelta(days=1)
+
+    if batch_manager:
+        batch_manager.flush()
 
     print(
         f"Finished {len(words)} (skipped {skipped_words}) words in {time.time() - started:.2f} seconds, found {stats['found_interesting_pages']} pages"

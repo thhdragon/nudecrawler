@@ -5,8 +5,12 @@ import os
 import signal
 import sys
 
-import daemon
-from daemon import pidfile
+if os.name != "nt":
+    import daemon
+    from daemon import pidfile
+else:
+    daemon = None
+    pidfile = None
 from flask import Flask, request
 from PIL import Image, UnidentifiedImageError
 from rich.pretty import pprint
@@ -51,6 +55,69 @@ def detect():
     return dict(verdict=verdict, page=page, nsfw_score=nsfw_score)
 
 
+@app.route("/detect_batch", methods=["POST"])
+def detect_batch():
+    paths = request.json.get("paths", [])
+    pages = request.json.get("pages", [])
+    threshold = float(
+        request.json.get("threshold", os.getenv("DETECTOR_THRESHOLD", "0.5"))
+    )
+
+    images = []
+    valid_indices = []
+    errors = {}
+
+    for idx, path in enumerate(paths):
+        page = pages[idx] if idx < len(pages) else None
+        try:
+            image = Image.open(path).convert("RGB")
+            images.append(image)
+            valid_indices.append(idx)
+        except UnidentifiedImageError as e:
+            print(f"Err opening image {path}: {page} {e}")
+            errors[idx] = str(e)
+        except Exception as e:
+            print(f"Got exception opening image {path}: {page} {e}")
+            errors[idx] = str(e)
+
+    verdicts = [None] * len(paths)
+    scores = [0.0] * len(paths)
+
+    if images:
+        try:
+            results = classifier(images, batch_size=len(images))
+            for i, result in zip(valid_indices, results):
+                result_scores = {r["label"]: r["score"] for r in result}
+                nsfw_score = result_scores.get("nsfw", 0.0)
+                verdict = nsfw_score >= threshold
+                verdicts[i] = bool(verdict)
+                scores[i] = float(nsfw_score)
+                page = pages[i] if i < len(pages) else None
+                pprint(f"{page}: {verdict} (nsfw={nsfw_score:.3f})")
+        except Exception as e:
+            print(f"Got exception during classification: {e}")
+            for idx in valid_indices:
+                errors[idx] = f"Classification failed: {e}"
+
+    response_items = []
+    for idx in range(len(paths)):
+        if idx in errors:
+            response_items.append({
+                "status": "ERROR",
+                "error": errors[idx],
+                "verdict": False,
+                "nsfw_score": 0.0
+            })
+        else:
+            response_items.append({
+                "status": "OK",
+                "verdict": verdicts[idx],
+                "nsfw_score": scores[idx]
+            })
+
+    return {"results": response_items}
+
+
 def get_args():
     config_path = get_config_path()
     parser = argparse.ArgumentParser("Daemonical REST API for Falconsai NSFW detection")
@@ -92,6 +159,9 @@ def main():
         sys.exit(0)
 
     if args.daemon:
+        if os.name == "nt":
+            print("Daemon mode not supported on Windows.", file=sys.stderr)
+            sys.exit(1)
         print("work as daemon...")
         with daemon.DaemonContext(pidfile=pidfile.TimeoutPIDLockFile(pidfile_path)):
             load_model()

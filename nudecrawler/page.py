@@ -61,6 +61,7 @@ class Page:
         ignore_content_length=None,
         expr="True",
         workers=1,
+        batch_manager=None,
     ):
         self.url = url
         self.workers = workers
@@ -70,6 +71,8 @@ class Page:
         self.nude_images = 0
         self.nonnude_images = 0
         self.total_images = 0
+        self.pending_images = 0
+        self.batch_manager = batch_manager
 
         # images not found in cache
         self.new_nude_images = 0
@@ -378,15 +381,80 @@ class Page:
 
         if not self.all_found:
             targets = image_list[: self.max_pictures]
+
+            def process_target(url):
+                # 1. Check URL Cache
+                verdict = cache.url2v(url)
+                if verdict is not None:
+                    with self._lock:
+                        if verdict:
+                            self.nude_images += 1
+                            self.log(f"{url} is nude (cached url)")
+                            if self.batch_manager and self.batch_manager.keep_dir:
+                                from .batch import save_to_keep
+                                save_to_keep(url, keep_dir=self.batch_manager.keep_dir)
+                        else:
+                            self.nonnude_images += 1
+                            self.log(f"{url} is NOT nude (cached url)")
+                    return None
+
+                # 2. Download remote image
+                try:
+                    ri = RemoteImage(url, page_url=self.url)
+                    sum_val = sha1sum(ri.path)
+                except Exception as e:
+                    printv("Broken image:", url)
+                    print(e)
+                    return None
+
+                # 3. Check Sum Cache
+                verdict = cache.sum2v(sum_val, url=url)
+                if verdict is not None:
+                    with self._lock:
+                        if verdict:
+                            self.nude_images += 1
+                            self.log(f"{url} is nude (cached sum)")
+                            if self.batch_manager and self.batch_manager.keep_dir:
+                                from .batch import save_to_keep
+                                save_to_keep(url, ri.path, sum_val, self.batch_manager.keep_dir)
+                        else:
+                            self.nonnude_images += 1
+                            self.log(f"{url} is NOT nude (cached sum)")
+                    return None
+
+                # 4. Needs actual detection
+                return (ri, sum_val)
+
             if self.workers > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=self.workers) as executor:
-                    executor.map(self.is_nude, targets)
-                with processed_images_lock:
-                    processed_images += len(targets)
+                    results = list(executor.map(process_target, targets))
             else:
-                for url in targets:
-                    self.is_nude(url)
-                    processed_images += 1
+                results = [process_target(url) for url in targets]
+
+            with processed_images_lock:
+                processed_images += len(targets)
+
+            for res in results:
+                if res is None:
+                    continue
+                ri, sum_val = res
+                if self.batch_manager:
+                    self.batch_manager.add_image(ri, sum_val, self)
+                else:
+                    try:
+                        verdict = ri.detect_image(self.detect_image)
+                        cache.register(ri.url, sum_val, verdict)
+                        self.new_total_images += 1
+                        if verdict:
+                            self.new_nude_images += 1
+                            self.nude_images += 1
+                            self.log(f"{ri.url} is nude")
+                        else:
+                            self.new_nonnude_images += 1
+                            self.nonnude_images += 1
+                            self.log(f"{ri.url} is NOT nude")
+                    except Exception as e:
+                        print(f"Error detecting {ri.url}: {e}")
 
     def status(self):
 

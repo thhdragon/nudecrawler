@@ -253,6 +253,18 @@ def get_args(argv: str, methods_list: list[str], context_fields: list):
         default=config["longrun"].get("workers", 4),
         help=f"number of parallel worker threads ({config['longrun'].get('workers', 4)})",
     )
+    g.add_argument(
+        "--batch-size",
+        type=int,
+        default=config["longrun"].get("batch-size", 16),
+        help=f"batch size for nudity detection ({config['longrun'].get('batch-size', 16)})",
+    )
+    g.add_argument(
+        "-k",
+        "--keep",
+        default=config["longrun"].get("keep"),
+        help="directory to save NSFW (nude) images",
+    )
 
     return parser.parse_args(argv)
 
@@ -309,6 +321,8 @@ def get_default_config():
             "stop": None,
             "refresh": None,
             "workers": 4,
+            "batch-size": 16,
+            "keep": None,
         },
         "nudenet": {
             "FEMALE_BREAST_EXPOSED": 0.5,

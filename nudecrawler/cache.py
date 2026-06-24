@@ -69,7 +69,7 @@ class ImageCache(object):
             if self._new >= new:
                 printv(f"Save cache with {self._new} updates")
                 self.save_unlocked(tmppath)
-                os.rename(tmppath, path)
+                os.replace(tmppath, path)
 
     def save_unlocked(self, path):
         data = dict(_url2sum=self._url2sum, _sum2v=self._sum2v)
