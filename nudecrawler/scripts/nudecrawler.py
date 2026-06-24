@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import concurrent.futures
 import datetime
 import json
 import logging
@@ -239,21 +240,95 @@ def check_word(word, day, fails, resumecount=None):
         print(f"Resume from word {word} count {c}")
 
     nfails = 0
+    chunk_size = workers if workers > 1 else 1
+
     while nfails < fails:
-        url = f"{baseurl}-{day.month:02}-{day.day:02}-{c}"
-        p = analyse(url)
+        # Build a chunk of candidate URLs
+        chunk_urls = []
+        for i in range(chunk_size):
+            url = f"{baseurl}-{day.month:02}-{day.day:02}-{c + i}"
+            chunk_urls.append((c + i, url))
 
-        if p.http_code == 404:
-            nfails += 1
-        else:
-            # end of gap
-            if nfails > stats["gap_max"]:
-                stats["gap_max"] = nfails
-                stats["gap_url"] = url
-            nfails = 0
+        if chunk_size == 1:
+            idx, url = chunk_urls[0]
+            p = analyse(url)
+            if p.http_code == 404:
+                nfails += 1
+            else:
+                if nfails > stats["gap_max"]:
+                    stats["gap_max"] = nfails
+                    stats["gap_url"] = url
+                nfails = 0
+            c += 1
+            stats["resume"]["count"] = c
+            continue
 
-        c += 1
-        stats["resume"]["count"] = c
+        # Instantiate Page objects in parallel
+        def init_page(item):
+            idx_val, url_val = item
+            try:
+                p_obj = Page(
+                    url_val,
+                    all_found=all_found,
+                    detect_url=detect_url,
+                    detect_image=detect_image,
+                    ignore_content_length=None,
+                    min_images_size=stats["filter"]["min_image_size"],
+                    image_extensions=stats["filter"]["image_extensions"],
+                    min_total_images=stats["filter"]["min_total_images"],
+                    max_errors=stats["filter"]["max_errors"],
+                    max_pictures=stats["filter"]["max_pictures"],
+                    expr=stats["filter"]["expr"],
+                    min_content_length=stats["filter"]["min_content_length"],
+                    workers=workers,
+                    batch_manager=batch_manager,
+                )
+                return idx_val, p_obj, None
+            except Exception as ex:
+                return idx_val, None, ex
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=chunk_size) as executor:
+            results = list(executor.map(init_page, chunk_urls))
+
+        results.sort(key=lambda x: x[0])
+
+        break_loop = False
+        for idx, p, err in results:
+            if err is not None:
+                raise err
+
+            url = p.url
+            stats["urls"] += 1
+
+            if p.http_code == 404:
+                nfails += 1
+                finalize_page(p)
+                previous_content_length = None
+            else:
+                if (
+                    previous_content_length is not None
+                    and previous_content_length == p.content_length
+                ):
+                    p.ignore(f"Ignore because matches prev page content-length = {p.content_length}")
+
+                p.check_all()
+                if p.pending_images == 0:
+                    finalize_page(p)
+
+                if nfails > stats["gap_max"]:
+                    stats["gap_max"] = nfails
+                    stats["gap_url"] = url
+                nfails = 0
+
+            c += 1
+            stats["resume"]["count"] = c
+
+            if nfails >= fails:
+                break_loop = True
+                break
+
+        if break_loop:
+            break
 
 
 def sanity_check(args):

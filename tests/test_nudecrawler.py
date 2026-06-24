@@ -66,3 +66,28 @@ class TestBasic:
         assert len(files) > 0
         for f in files:
             assert f.endswith((".jpg", ".jpeg", ".png"))
+
+    def test_check_word_parallel(self):
+        import datetime
+        from nudecrawler.scripts.nudecrawler import check_word, stats
+        import nudecrawler.scripts.nudecrawler as nc_module
+
+        # Configure settings for check_word
+        nc_module.workers = 4
+        nc_module.all_found = True
+        nc_module.detect_image = ":true"
+
+        word = "https://telegra.ph/empty"
+        day = datetime.datetime(2024, 4, 3)
+        
+        stats["resume"] = {}
+        stats["gap_max"] = 0
+        stats["gap_url"] = None
+
+        check_word(word, day, fails=2)
+
+        # It should check empty-04-03 (c=1), then empty-04-03-2 (404), empty-04-03-3 (404), etc.
+        # With fails=2, it will stop after c=3 (since 2 and 3 are 404s).
+        # c will be incremented to 4.
+        assert stats["resume"]["count"] >= 3
+
