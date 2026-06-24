@@ -8,6 +8,7 @@ unbuffered = true
 [depth]
 days = 180
 fails = 5
+lookahead = 16
 
 [filter]
 all = false

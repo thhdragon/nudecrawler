@@ -74,6 +74,7 @@ class TestBasic:
 
         # Configure settings for check_word
         nc_module.workers = 4
+        nc_module.lookahead = 4
         nc_module.all_found = True
         nc_module.detect_image = ":true"
 

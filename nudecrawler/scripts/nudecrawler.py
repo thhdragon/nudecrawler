@@ -84,6 +84,7 @@ refresh = None
 detect_image = None
 detect_url = None
 workers = 1
+lookahead = 16
 batch_manager = None
 
 #
@@ -240,7 +241,10 @@ def check_word(word, day, fails, resumecount=None):
         print(f"Resume from word {word} count {c}")
 
     nfails = 0
-    chunk_size = workers if workers > 1 else 1
+    if workers > 1:
+        chunk_size = lookahead if lookahead > 1 else 1
+    else:
+        chunk_size = 1
 
     while nfails < fails:
         # Build a chunk of candidate URLs
@@ -287,7 +291,7 @@ def check_word(word, day, fails, resumecount=None):
             except Exception as ex:
                 return idx_val, None, ex
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=chunk_size) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             results = list(executor.map(init_page, chunk_urls))
 
         results.sort(key=lambda x: x[0])
@@ -366,7 +370,8 @@ def main():
         detect_image, \
         detect_url, \
         refresh, \
-        workers
+        workers, \
+        lookahead
 
     words = None
     args = get_args(
@@ -427,6 +432,7 @@ def main():
     stats["cache_path"] = args.cache
     stats["cache_save"] = args.cache_save
     workers = args.workers
+    lookahead = args.lookahead
 
     if args.detect:
         try:

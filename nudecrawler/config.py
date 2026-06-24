@@ -113,6 +113,12 @@ def get_args(argv: str, methods_list: list[str], context_fields: list):
         default=config["depth"]["fails"],
         help=f"stop searching next pages with same words after N failures ({config['depth']['fails']})",
     )
+    g.add_argument(
+        "--lookahead",
+        type=int,
+        default=config["depth"].get("lookahead", 16),
+        help=f"number of URLs to check in parallel / look ahead ({config['depth'].get('lookahead', 16)})",
+    )
 
     g = parser.add_argument_group("Page filtering options")
     g.add_argument(
@@ -294,6 +300,7 @@ def get_default_config():
         "depth": {
             "days": 10,
             "fails": 5,
+            "lookahead": 16,
         },
         "filter": {
             "all": False,
