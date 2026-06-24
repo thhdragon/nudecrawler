@@ -92,3 +92,62 @@ class TestBasic:
         # c will be incremented to 4.
         assert stats["resume"]["count"] >= 3
 
+    def test_resume_command(self, tmp_path, monkeypatch):
+        import json
+        import datetime
+        from nudecrawler.scripts import nudecrawler as nc_module
+
+        stats_file = tmp_path / "stats.json"
+        dummy_stats = {
+            "cmd": "nudecrawler -w dummy_wordlist.txt --stats stats.json -d 1",
+            "resume": {
+                "word": "dummy-word",
+                "month": 4,
+                "day": 3,
+                "count": 5
+            },
+            "filter": {
+                "expr": "True",
+                "min_image_size": None,
+                "min_total_images": 0,
+                "min_content_length": None,
+                "max_pictures": None,
+                "image_extensions": None,
+                "max_errors": None,
+            }
+        }
+        with open(stats_file, "w") as f:
+            json.dump(dummy_stats, f)
+
+        # Mock check_word to avoid actual crawling
+        called_args = []
+        def mock_check_word(word, day, fails, resumecount=None):
+            called_args.append((word, day, fails, resumecount))
+
+        monkeypatch.setattr(nc_module, "check_word", mock_check_word)
+
+        # Mock open to return our word list when trying to read the dummy wordlist file
+        orig_open = open
+        def mock_open(file, *args, **kwargs):
+            if "dummy_wordlist.txt" in str(file):
+                from io import StringIO
+                return StringIO("dummy-word\n")
+            return orig_open(file, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", mock_open)
+
+        # Mock sys.argv to simulate running nudecrawler --resume <path>
+        monkeypatch.setattr("sys.argv", ["nudecrawler", "--resume", str(stats_file)])
+
+        # Call main
+        nc_module.main()
+
+        # Verify that check_word was called with the resumed parameters
+        assert len(called_args) == 1
+        word, day, fails, resumecount = called_args[0]
+        assert word == "dummy-word"
+        assert day.month == 4
+        assert day.day == 3
+        assert resumecount == 5
+
+

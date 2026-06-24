@@ -402,7 +402,13 @@ def main():
             abort(f"Missing status file {args.resume}")
 
         cmd = stats["cmd"]
-        args = get_args(argv=shlex.split(cmd)[1:])
+        if not cmd or not isinstance(cmd, str):
+            abort(f"Invalid or missing command ('cmd') in status file {args.resume}")
+        args = get_args(
+            argv=shlex.split(cmd)[1:],
+            methods_list=", ".join(filter_methods.keys()),
+            context_fields=context_fields,
+        )
         fastforward = True
     else:
         stats["cmd"] = shlex.join(sys.argv)
