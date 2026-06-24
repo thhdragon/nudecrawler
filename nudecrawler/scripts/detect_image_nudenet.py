@@ -22,8 +22,11 @@ start_detector = "detect-server-nudenet.py"
 def detect_nudity(path, address, threshold):
     endpoint = urljoin(address, "/detect")
     try:
-        r = requests.post(endpoint, json={"path": path, "page": os.getenv("NUDECRAWLER_PAGE_URL")})
-        r.raise_for_status()
+        with open(path, "rb") as f:
+            files = {"image": f}
+            data = {"page": os.getenv("NUDECRAWLER_PAGE_URL")}
+            r = requests.post(endpoint, files=files, data=data)
+            r.raise_for_status()
 
     except requests.RequestException as e:
         print(e)

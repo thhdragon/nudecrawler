@@ -98,17 +98,26 @@ class BatchManager:
         paths = [ri.path for ri, _, _ in batch]
         pages = [page.url for _, _, page in batch]
 
+        files = []
+        file_handles = []
         try:
-            r = requests.post(endpoint, json={
-                "paths": paths,
-                "pages": pages,
-                "threshold": detector_threshold
-            }, timeout=30)
+            for path in paths:
+                fh = open(path, "rb")
+                file_handles.append(fh)
+                files.append(("images", (os.path.basename(path), fh, "image/jpeg")))
+
+            data = [("pages", page) for page in pages]
+            data.append(("threshold", str(detector_threshold)))
+
+            r = requests.post(endpoint, files=files, data=data, timeout=30)
             r.raise_for_status()
             results = r.json().get("results", [])
         except Exception as e:
             print(f"Error calling detect_batch: {e}")
             results = [{"status": "ERROR", "error": str(e)}] * len(batch)
+        finally:
+            for fh in file_handles:
+                fh.close()
 
         for (ri, sum_val, page), res in zip(batch, results):
             if res.get("status") == "OK":

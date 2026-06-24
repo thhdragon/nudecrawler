@@ -20,8 +20,11 @@ start_detector = "detect-server-falconsai.py"
 def detect_nudity(path, address, threshold):
     endpoint = urljoin(address, "/detect")
     try:
-        r = requests.post(endpoint, json={"path": path, "threshold": threshold})
-        r.raise_for_status()
+        with open(path, "rb") as f:
+            files = {"image": f}
+            data = {"threshold": threshold}
+            r = requests.post(endpoint, files=files, data=data)
+            r.raise_for_status()
     except requests.RequestException as e:
         print(e)
         print("maybe detector not running?")

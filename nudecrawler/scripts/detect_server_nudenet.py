@@ -5,6 +5,7 @@ import os
 import sys
 import daemon
 from daemon import pidfile
+import tempfile
 
 # import lockfile
 import argparse
@@ -27,17 +28,38 @@ def ping():
 
 @app.route("/detect", methods=["POST"])
 def detect():
-    path = request.json["path"]
-    page = request.json["page"]
+    temp_path = None
+    page = None
+
+    if request.files and "image" in request.files:
+        file = request.files["image"]
+        page = request.form.get("page")
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+            tmp.write(file.read())
+            temp_path = tmp.name
+    elif request.json:
+        path = request.json.get("path")
+        page = request.json.get("page")
+        if path:
+            temp_path = path
+
+    if not temp_path:
+        return {"status": "ERROR", "error": "No image provided"}
 
     try:
-        verdict = nudenet_detect(path=path, page_url=page)
+        verdict = nudenet_detect(path=temp_path, page_url=page)
     except UnidentifiedImageError as e:
         print(f"Err: {page} {e}")
-        result = {"status": "ERROR", "error": str(e)}
-        return result
+        return {"status": "ERROR", "error": str(e)}
     except Exception as e:
         print(f"Got uncaught exception {type(e)}: {e}")
+        return {"status": "ERROR", "error": str(e)}
+    finally:
+        if request.files and "image" in request.files and temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception as e:
+                print(f"Failed to delete temp file {temp_path}: {e}")
 
     pprint(f"{page}: {verdict}")
     return dict(verdict=verdict, page=page)

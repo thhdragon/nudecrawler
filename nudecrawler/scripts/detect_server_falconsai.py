@@ -31,14 +31,29 @@ def ping():
 
 @app.route("/detect", methods=["POST"])
 def detect():
-    path = request.json["path"]
-    page = request.json.get("page")
-    threshold = float(
-        request.json.get("threshold", os.getenv("DETECTOR_THRESHOLD", "0.5"))
-    )
+    image_file = None
+    page = None
+    threshold = float(os.getenv("DETECTOR_THRESHOLD", "0.5"))
+
+    if request.files and "image" in request.files:
+        image_file = request.files["image"]
+        page = request.form.get("page")
+        threshold = float(request.form.get("threshold", threshold))
+    elif request.json:
+        path = request.json.get("path")
+        page = request.json.get("page")
+        threshold = float(request.json.get("threshold", threshold))
+        if path:
+            image_file = path
+
+    if not image_file:
+        return {"status": "ERROR", "error": "No image provided"}
 
     try:
-        image = Image.open(path).convert("RGB")
+        if isinstance(image_file, str):
+            image = Image.open(image_file).convert("RGB")
+        else:
+            image = Image.open(image_file.stream).convert("RGB")
         results = classifier(image)
     except UnidentifiedImageError as e:
         print(f"Err: {page} {e}")
@@ -57,31 +72,43 @@ def detect():
 
 @app.route("/detect_batch", methods=["POST"])
 def detect_batch():
-    paths = request.json.get("paths", [])
-    pages = request.json.get("pages", [])
-    threshold = float(
-        request.json.get("threshold", os.getenv("DETECTOR_THRESHOLD", "0.5"))
-    )
-
+    threshold = float(os.getenv("DETECTOR_THRESHOLD", "0.5"))
+    
     images = []
     valid_indices = []
     errors = {}
+    paths_or_files = []
+    pages = []
 
-    for idx, path in enumerate(paths):
+    if request.files and request.files.getlist("images"):
+        uploaded_files = request.files.getlist("images")
+        pages = request.form.getlist("pages")
+        threshold = float(request.form.get("threshold", threshold))
+        paths_or_files = uploaded_files
+    elif request.json:
+        paths = request.json.get("paths", [])
+        pages = request.json.get("pages", [])
+        threshold = float(request.json.get("threshold", threshold))
+        paths_or_files = paths
+
+    for idx, item in enumerate(paths_or_files):
         page = pages[idx] if idx < len(pages) else None
         try:
-            image = Image.open(path).convert("RGB")
+            if isinstance(item, str):
+                image = Image.open(item).convert("RGB")
+            else:
+                image = Image.open(item.stream).convert("RGB")
             images.append(image)
             valid_indices.append(idx)
         except UnidentifiedImageError as e:
-            print(f"Err opening image {path}: {page} {e}")
+            print(f"Err opening image {item if isinstance(item, str) else 'uploaded_file'}: {page} {e}")
             errors[idx] = str(e)
         except Exception as e:
-            print(f"Got exception opening image {path}: {page} {e}")
+            print(f"Got exception opening image {item if isinstance(item, str) else 'uploaded_file'}: {page} {e}")
             errors[idx] = str(e)
 
-    verdicts = [None] * len(paths)
-    scores = [0.0] * len(paths)
+    verdicts = [None] * len(paths_or_files)
+    scores = [0.0] * len(paths_or_files)
 
     if images:
         try:
@@ -100,7 +127,7 @@ def detect_batch():
                 errors[idx] = f"Classification failed: {e}"
 
     response_items = []
-    for idx in range(len(paths)):
+    for idx in range(len(paths_or_files)):
         if idx in errors:
             response_items.append({
                 "status": "ERROR",
@@ -137,8 +164,16 @@ def get_args():
 def load_model():
     global classifier
     print("Loading Falconsai NSFW model...")
+    device = -1
+    try:
+        import torch
+        if torch.cuda.is_available():
+            device = 0
+            print("CUDA is available. Using GPU for classification.")
+    except ImportError:
+        pass
     classifier = pipeline(
-        "image-classification", model="Falconsai/nsfw_image_detection"
+        "image-classification", model="Falconsai/nsfw_image_detection", device=device
     )
     print("Model ready.")
 
