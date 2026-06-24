@@ -30,7 +30,7 @@ def detect_nudity(path, address, threshold):
         sys.exit(100)
 
     rj = r.json()
-    return int(not rj["verdict"])
+    return int(rj["verdict"])
 
 
 def main():

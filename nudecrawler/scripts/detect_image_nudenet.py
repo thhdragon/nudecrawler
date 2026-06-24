@@ -34,9 +34,8 @@ def detect_nudity(path, address, threshold):
 
     rj = r.json()
 
-    # since verdict: True=1=nude we invert it to get nude = exit code 0
-
-    return int(not rj["verdict"])
+    # since verdict: True=1=nude we return it directly so nude = exit code 1
+    return int(rj["verdict"])
 
 
 def main():
