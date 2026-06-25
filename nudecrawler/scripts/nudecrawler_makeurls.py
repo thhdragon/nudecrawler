@@ -2,8 +2,11 @@
 
 import argparse
 import datetime
+import sys
 
 import transliterate
+
+import nudecrawler.tgru
 
 
 def process_word(word, counter=0):
@@ -45,11 +48,12 @@ def get_args():
 
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8")
     args = get_args()
 
     if args.wordlist:
         counter = args.count
-        with open(args.wordlist, "r") as fh:
+        with open(args.wordlist, "r", encoding="utf-8") as fh:
             words = [line.rstrip() for line in fh]
     else:
         words = args.WORD

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 
+import transliterate
 import transliterate.discover
 from dotenv import load_dotenv
 from rich.pretty import pprint
@@ -335,6 +336,110 @@ def check_word(word, day, fails, resumecount=None):
             break
 
 
+def run_bulk_http_check(bulk_path, urls, workers=100):
+    print(f"# Checking {len(urls)} candidate URLs using bulk-http-check...")
+
+    # We run bulk-http-check with concurrency setting
+    process = subprocess.Popen(
+        [bulk_path, "-n", str(workers)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8"
+    )
+
+    try:
+        # Write all URLs separated by newlines to stdin
+        stdout, stderr = process.communicate(input="\n".join(urls), timeout=600)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        stdout, stderr = process.communicate()
+        print("# Warning: bulk-http-check timed out", file=sys.stderr)
+
+    valid_urls = []
+    # bulk-http-check output lines look like:
+    # https://telegra.ph/some-url OK 200
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) >= 3:
+            url_val = parts[0]
+            status_code = parts[2]
+            if status_code == "200":
+                valid_urls.append(url_val)
+
+    print(f"# bulk-http-check found {len(valid_urls)} active URLs out of {len(urls)} candidates.")
+    return valid_urls
+
+
+def process_urls(urls):
+    global previous_content_length, workers, stats, all_found, detect_url, detect_image, batch_manager, lookahead
+
+    chunk_size = lookahead if lookahead > 1 and workers > 1 else 1
+
+    for chunk_start in range(0, len(urls), chunk_size):
+        chunk = urls[chunk_start : chunk_start + chunk_size]
+        chunk_urls = list(enumerate(chunk))
+
+        if chunk_size == 1:
+            _, url = chunk_urls[0]
+            analyse(url)
+            continue
+
+        def init_page(item):
+            idx_val, url_val = item
+            try:
+                p_obj = Page(
+                    url_val,
+                    all_found=all_found,
+                    detect_url=detect_url,
+                    detect_image=detect_image,
+                    ignore_content_length=None,
+                    min_images_size=stats["filter"]["min_image_size"],
+                    image_extensions=stats["filter"]["image_extensions"],
+                    min_total_images=stats["filter"]["min_total_images"],
+                    max_errors=stats["filter"]["max_errors"],
+                    max_pictures=stats["filter"]["max_pictures"],
+                    expr=stats["filter"]["expr"],
+                    min_content_length=stats["filter"]["min_content_length"],
+                    workers=workers,
+                    batch_manager=batch_manager,
+                )
+                return idx_val, p_obj, None
+            except Exception as ex:
+                return idx_val, None, ex
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            results = list(executor.map(init_page, chunk_urls))
+
+        results.sort(key=lambda x: x[0])
+
+        for idx, p, err in results:
+            if err is not None:
+                print(f"Error processing {chunk[idx]}: {err}", file=sys.stderr)
+                continue
+
+            url = p.url
+            stats["urls"] += 1
+
+            if p.http_code == 404:
+                finalize_page(p)
+                previous_content_length = None
+            else:
+                if (
+                    previous_content_length is not None
+                    and previous_content_length == p.content_length
+                ):
+                    p.ignore(f"Ignore because matches prev page content-length = {p.content_length}")
+
+                p.check_all()
+                if p.pending_images == 0:
+                    finalize_page(p)
+
+
 def sanity_check(args):
     pass
 
@@ -525,32 +630,74 @@ def main():
     logfile = args.log
     stats_file = args.stats
 
-    for w in words:
-        if fastforward and not matched_resume:
-            if w == stats["resume"]["word"]:
-                matched_resume = True
-            else:
-                skipped_words += 1
-                continue
-
-        stats["resume"]["word"] = w
-
-        if fastforward:
-            day = datetime.datetime(2020, stats["resume"]["month"], stats["resume"]["day"])
-        elif args.day is None:
-            day = datetime.datetime.now()
+    use_bulk = False
+    bulk_path = None
+    if not args.no_bulk and not fastforward:
+        cwd_bin = os.path.join(os.getcwd(), "bulk-http-check")
+        cwd_bin_exe = os.path.join(os.getcwd(), "bulk-http-check.exe")
+        if os.path.isfile(cwd_bin) and os.access(cwd_bin, os.X_OK):
+            bulk_path = cwd_bin
+        elif os.path.isfile(cwd_bin_exe) and (os.name == "nt" or os.access(cwd_bin_exe, os.X_OK)):
+            bulk_path = cwd_bin_exe
         else:
-            day = datetime.datetime(2020, args.day[0], args.day[1])
+            bulk_path = shutil.which("bulk-http-check") or shutil.which("bulk-http-check.exe")
 
-        days_tried = 0
-        while days_tried < args.days:
-            resumecount = stats["resume"]["count"] if fastforward else None
-            # stop fastforward
-            fastforward = False
-            check_word(w, day, args.fails, resumecount=resumecount)
+        if bulk_path:
+            use_bulk = True
+        else:
+            print("# bulk-http-check executable not found in PATH or CWD. Using standard sequential crawler.")
 
-            days_tried += 1
-            day = day - datetime.timedelta(days=1)
+    if use_bulk:
+        if args.day is None:
+            start_day = datetime.datetime.now()
+        else:
+            start_day = datetime.datetime(2020, args.day[0], args.day[1])
+
+        candidate_urls = []
+        for w in words:
+            w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
+            if w_cleaned.startswith("https://"):
+                baseurl = w_cleaned
+            else:
+                trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
+                baseurl = f"https://telegra.ph/{trans_word}"
+
+            day = start_day
+            for _ in range(args.days):
+                candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}")
+                for c in range(2, args.max_counter + 1):
+                    candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}-{c}")
+                day = day - datetime.timedelta(days=1)
+
+        valid_urls = run_bulk_http_check(bulk_path, candidate_urls, workers=args.bulk_workers)
+        process_urls(valid_urls)
+    else:
+        for w in words:
+            if fastforward and not matched_resume:
+                if w == stats["resume"]["word"]:
+                    matched_resume = True
+                else:
+                    skipped_words += 1
+                    continue
+
+            stats["resume"]["word"] = w
+
+            if fastforward:
+                day = datetime.datetime(2020, stats["resume"]["month"], stats["resume"]["day"])
+            elif args.day is None:
+                day = datetime.datetime.now()
+            else:
+                day = datetime.datetime(2020, args.day[0], args.day[1])
+
+            days_tried = 0
+            while days_tried < args.days:
+                resumecount = stats["resume"]["count"] if fastforward else None
+                # stop fastforward
+                fastforward = False
+                check_word(w, day, args.fails, resumecount=resumecount)
+
+                days_tried += 1
+                day = day - datetime.timedelta(days=1)
 
     if batch_manager:
         batch_manager.flush()

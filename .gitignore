@@ -11,3 +11,5 @@ poetry.lock
 cache.json.tmp
 
 **/cache.json
+a/wl-a.csv
+a_urls.txt

@@ -175,4 +175,46 @@ class TestBasic:
         for f in files:
             assert f.endswith((".jpg", ".jpeg", ".png"))
 
+    def test_bulk_http_check(self, monkeypatch):
+        import shutil
+        import subprocess
+        from nudecrawler.scripts import nudecrawler as nc_module
+
+        # Mock shutil.which to pretend bulk-http-check exists
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/dummy/path/bulk-http-check" if "bulk-http-check" in cmd else None)
+
+        # Mock os.path.isfile and os.access to return False for CWD bin to force PATH check
+        import os
+        monkeypatch.setattr(os.path, "isfile", lambda path: False)
+
+        # Mock Popen
+        class MockProcess:
+            def __init__(self, *args, **kwargs):
+                pass
+            def communicate(self, input=None, timeout=None):
+                # Return mock output matching bulk-http-check format:
+                # the first URL is 200, others are 404
+                urls = input.splitlines()
+                output = f"{urls[0]} OK 200\n"
+                for u in urls[1:]:
+                    output += f"{u} OK 404\n"
+                return output, ""
+
+        monkeypatch.setattr(subprocess, "Popen", MockProcess)
+
+        # Mock process_urls to capture the URLs it processes
+        processed = []
+        monkeypatch.setattr(nc_module, "process_urls", lambda urls: processed.extend(urls))
+
+        # Setup sys.argv
+        monkeypatch.setattr("sys.argv", ["nudecrawler", "sasha-grey", "-d", "1", "--max-counter", "2"])
+
+        # Call main
+        nc_module.main()
+
+        # Check that process_urls was called with only the 200 OK URL
+        assert len(processed) == 1
+        assert "sasha-grey" in processed[0]
+
+
 
