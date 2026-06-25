@@ -1,11 +1,13 @@
 #!/usr/bin/env python
 
 import argparse
+import collections
 import concurrent.futures
 import datetime
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -654,56 +656,77 @@ def main():
         else:
             start_day = datetime.datetime(2020, args.day[0], args.day[1])
 
-        candidate_urls = []
-        for w in words:
-            w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
-            if w_cleaned.startswith("https://"):
-                baseurl = w_cleaned
-            else:
-                trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
-                baseurl = f"https://telegra.ph/{trans_word}"
-
-            day = start_day
-            for _ in range(args.days):
-                candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}")
-                for c in range(2, args.lookahead + 1):
-                    candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}-{c}")
-                day = day - datetime.timedelta(days=1)
-
-        valid_urls = run_bulk_http_check(bulk_path, candidate_urls, workers=args.bulk_workers)
-
-        # Filter valid_urls to respect args.fails day-by-day
-        valid_urls_set = set(valid_urls)
-        filtered_valid_urls = []
-
-        for w in words:
-            w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
-            if w_cleaned.startswith("https://"):
-                baseurl = w_cleaned
-            else:
-                trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
-                baseurl = f"https://telegra.ph/{trans_word}"
-
-            day = start_day
-            for _ in range(args.days):
-                nfails = 0
-                url_base = f"{baseurl}-{day.month:02}-{day.day:02}"
-                if url_base in valid_urls_set:
-                    filtered_valid_urls.append(url_base)
-                    nfails = 0
+        def generate_candidates():
+            for w in words:
+                w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
+                if w_cleaned.startswith("https://"):
+                    baseurl = w_cleaned
                 else:
-                    nfails += 1
+                    trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
+                    baseurl = f"https://telegra.ph/{trans_word}"
 
-                if nfails < args.fails:
+                day = start_day
+                for _ in range(args.days):
+                    yield f"{baseurl}-{day.month:02}-{day.day:02}"
                     for c in range(2, args.lookahead + 1):
-                        url_suffix = f"{baseurl}-{day.month:02}-{day.day:02}-{c}"
-                        if url_suffix in valid_urls_set:
-                            filtered_valid_urls.append(url_suffix)
+                        yield f"{baseurl}-{day.month:02}-{day.day:02}-{c}"
+                    day = day - datetime.timedelta(days=1)
+
+        # Run bulk check in chunks of 50,000 URLs to avoid OOM issues in memory
+        chunk_size = 50000
+        valid_urls = []
+        current_chunk = []
+        for url in generate_candidates():
+            current_chunk.append(url)
+            if len(current_chunk) >= chunk_size:
+                valid_urls.extend(run_bulk_http_check(bulk_path, current_chunk, workers=args.bulk_workers))
+                current_chunk = []
+        if current_chunk:
+            valid_urls.extend(run_bulk_http_check(bulk_path, current_chunk, workers=args.bulk_workers))
+
+        # Group valid_urls by (baseurl, month, day) in a set of valid suffixes to prevent nested O(N) lookup loops
+        valid_suffixes = collections.defaultdict(set)
+        url_pattern = re.compile(r'^(.*)-(\d{2})-(\d{2})(?:-(\d+))?$')
+
+        for url in valid_urls:
+            m = url_pattern.match(url)
+            if m:
+                base = m.group(1)
+                m_val = int(m.group(2))
+                d_val = int(m.group(3))
+                s_val = int(m.group(4)) if m.group(4) else 1
+                valid_suffixes[(base, m_val, d_val)].add(s_val)
+
+        filtered_valid_urls = []
+        for w in words:
+            w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
+            if w_cleaned.startswith("https://"):
+                baseurl = w_cleaned
+            else:
+                trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
+                baseurl = f"https://telegra.ph/{trans_word}"
+
+            day = start_day
+            for _ in range(args.days):
+                key = (baseurl, day.month, day.day)
+                if key in valid_suffixes:
+                    active_suffixes = valid_suffixes[key]
+                    filtered_s = []
+                    nfails = 0
+                    for c in range(1, args.lookahead + 1):
+                        if c in active_suffixes:
+                            filtered_s.append(c)
                             nfails = 0
                         else:
                             nfails += 1
                         if nfails >= args.fails:
                             break
+                    
+                    for s in filtered_s:
+                        if s == 1:
+                            filtered_valid_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}")
+                        else:
+                            filtered_valid_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}-{s}")
 
                 day = day - datetime.timedelta(days=1)
 
