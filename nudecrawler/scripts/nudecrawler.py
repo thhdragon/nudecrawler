@@ -237,17 +237,18 @@ def check_word(word, day, fails, resumecount=None):
         # if p.ignore:
         #    return
         c = 2
+        nfails = 1 if p.http_code == 404 else 0
     else:
         c = resumecount
         print(f"Resume from word {word} count {c}")
-
-    nfails = 0
-    if workers > 1:
-        chunk_size = lookahead if lookahead > 1 else 1
-    else:
-        chunk_size = 1
+        nfails = 0
 
     while nfails < fails:
+        if workers > 1:
+            chunk_size = max(1, min(lookahead, fails - nfails))
+        else:
+            chunk_size = 1
+
         # Build a chunk of candidate URLs
         chunk_urls = []
         for i in range(chunk_size):
@@ -665,12 +666,48 @@ def main():
             day = start_day
             for _ in range(args.days):
                 candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}")
-                for c in range(2, args.max_counter + 1):
+                for c in range(2, args.lookahead + 1):
                     candidate_urls.append(f"{baseurl}-{day.month:02}-{day.day:02}-{c}")
                 day = day - datetime.timedelta(days=1)
 
         valid_urls = run_bulk_http_check(bulk_path, candidate_urls, workers=args.bulk_workers)
-        process_urls(valid_urls)
+
+        # Filter valid_urls to respect args.fails day-by-day
+        valid_urls_set = set(valid_urls)
+        filtered_valid_urls = []
+
+        for w in words:
+            w_cleaned = w.replace(" ", "-").translate({ord("ь"): "", ord("ъ"): ""})
+            if w_cleaned.startswith("https://"):
+                baseurl = w_cleaned
+            else:
+                trans_word = transliterate.translit(w_cleaned, "tgru", reversed=True)
+                baseurl = f"https://telegra.ph/{trans_word}"
+
+            day = start_day
+            for _ in range(args.days):
+                nfails = 0
+                url_base = f"{baseurl}-{day.month:02}-{day.day:02}"
+                if url_base in valid_urls_set:
+                    filtered_valid_urls.append(url_base)
+                    nfails = 0
+                else:
+                    nfails += 1
+
+                if nfails < args.fails:
+                    for c in range(2, args.lookahead + 1):
+                        url_suffix = f"{baseurl}-{day.month:02}-{day.day:02}-{c}"
+                        if url_suffix in valid_urls_set:
+                            filtered_valid_urls.append(url_suffix)
+                            nfails = 0
+                        else:
+                            nfails += 1
+                        if nfails >= args.fails:
+                            break
+
+                day = day - datetime.timedelta(days=1)
+
+        process_urls(filtered_valid_urls)
     else:
         for w in words:
             if fastforward and not matched_resume:

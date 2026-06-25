@@ -234,12 +234,7 @@ def get_args(argv: str, methods_list: list[str], context_fields: list):
         default=config.get("no-bulk", False),
         help="Disable bulk-http-check and use standard sequential crawler",
     )
-    g.add_argument(
-        "--max-counter",
-        type=int,
-        default=config.get("max-counter", 20),
-        help="Max counter suffix to check for each day when using bulk-http-check (default: 20)",
-    )
+
     g.add_argument(
         "--bulk-workers",
         type=int,
@@ -316,7 +311,7 @@ def get_default_config():
         "verbose": False,
         "unbuffered": True,
         "no-bulk": False,
-        "max-counter": 20,
+
         "bulk-workers": 100,
         "depth": {
             "days": 10,

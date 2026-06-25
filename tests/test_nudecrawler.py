@@ -207,7 +207,7 @@ class TestBasic:
         monkeypatch.setattr(nc_module, "process_urls", lambda urls: processed.extend(urls))
 
         # Setup sys.argv
-        monkeypatch.setattr("sys.argv", ["nudecrawler", "sasha-grey", "-d", "1", "--max-counter", "2"])
+        monkeypatch.setattr("sys.argv", ["nudecrawler", "sasha-grey", "-d", "1", "--lookahead", "2"])
 
         # Call main
         nc_module.main()
@@ -215,6 +215,55 @@ class TestBasic:
         # Check that process_urls was called with only the 200 OK URL
         assert len(processed) == 1
         assert "sasha-grey" in processed[0]
+
+    def test_bulk_http_check_respects_fails(self, monkeypatch):
+        import shutil
+        import subprocess
+        import datetime
+        from nudecrawler.scripts import nudecrawler as nc_module
+
+        monkeypatch.setattr(shutil, "which", lambda cmd: "/dummy/path/bulk-http-check" if "bulk-http-check" in cmd else None)
+
+        import os
+        monkeypatch.setattr(os.path, "isfile", lambda path: False)
+
+        class MockProcess:
+            def __init__(self, *args, **kwargs):
+                pass
+            def communicate(self, input=None, timeout=None):
+                # Mock response where base URL is 200, next 3 are 404, and suffix 5 is 200
+                urls = input.splitlines()
+                output = ""
+                for u in urls:
+                    if u.endswith("-2") or u.endswith("-3") or u.endswith("-4"):
+                        output += f"{u} OK 404\n"
+                    elif u.endswith("-5"):
+                        output += f"{u} OK 200\n"
+                    else:
+                        output += f"{u} OK 200\n"
+                return output, ""
+
+        monkeypatch.setattr(subprocess, "Popen", MockProcess)
+
+        processed = []
+        monkeypatch.setattr(nc_module, "process_urls", lambda urls: processed.extend(urls))
+
+        # Setup argv with fails=3, lookahead=10, days=1
+        monkeypatch.setattr("sys.argv", ["nudecrawler", "sasha-grey", "-d", "1", "--fails", "3", "--lookahead", "10"])
+
+        nc_module.main()
+
+        # Since fails=3, we got:
+        # base: 200 (nfails=0)
+        # base-2: 404 (nfails=1)
+        # base-3: 404 (nfails=2)
+        # base-4: 404 (nfails=3) -> fails met, break.
+        # base-5 (200) should be skipped/filtered out.
+        # So only the base URL should be in processed.
+        assert len(processed) == 1
+        assert not any("-5" in u for u in processed)
+        assert any(u.endswith(f"{datetime.datetime.now().month:02}-{datetime.datetime.now().day:02}") for u in processed)
+
 
 
 
